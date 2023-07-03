@@ -4,19 +4,20 @@
 #include <curand_kernel.h>
 #include <fstream>
 
-#define NUM_SIMULATIONS 1000000
-#define NUM_TIMESTEPS 5000
+#define NUM_SIMULATIONS 3000000
+#define NUM_TIMESTEPS 1000
 #define DT 0.01
 
 // Pendulum parameters
 #define LENGTH 1.0
 #define MASS 1.0
-#define GRAVITY 3.0
+#define GRAVITY 9.81
 
 // PID parameters
-#define KP 3.0
-#define KI 0.1
-#define KD 0.5
+#define KP 10.0
+#define KI 0.0
+#define KD 1.5
+#define CONTROL_LIMIT 2.4
 
 __global__ void init(unsigned int seed, curandState_t* states) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -31,7 +32,7 @@ __global__ void simulate(curandState_t* states, double *state, double *initial_s
 
     // Initial state
     double theta = curand_uniform_double(&states[idx]) * 2 * M_PI - M_PI; // -pi to pi
-    double omega = curand_uniform_double(&states[idx]) * 2 - 1; // -1 to 1
+    double omega = curand_uniform_double(&states[idx]) * 4 - 2; // -1 to 1
 
     initial_state[idx*2] = theta;
     initial_state[idx*2+1] = omega;
@@ -47,12 +48,20 @@ __global__ void simulate(curandState_t* states, double *state, double *initial_s
         double control = KP * error + KI * integral + KD * derivative;
         previous_error = error;
 
+        // Clip control to reasonable values
+        if (control > CONTROL_LIMIT) control = CONTROL_LIMIT;
+        if (control < -CONTROL_LIMIT) control = -CONTROL_LIMIT;
+
         // Pendulum dynamics
         double alpha = GRAVITY/LENGTH * sin(theta) + control/MASS/LENGTH/LENGTH;
 
         // Update state using Euler integration
         theta += DT * omega;
         omega += DT * alpha;
+
+        // Wrap theta to -pi to pi
+        if (theta > M_PI) theta -= 2 * M_PI;
+        if (theta < -M_PI) theta += 2 * M_PI;
 
         // Write new state back to global memory
         state[idx*2] = theta;
